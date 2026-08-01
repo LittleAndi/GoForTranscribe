@@ -31,7 +31,12 @@ from common import (
 DEFAULT_MODEL = "KBLab/kb-whisper-large"
 
 
-def transcribe(samples, rate, args, device) -> list[dict]:
+def load_asr(model: str, device, token: str | None = None):
+    """Load an ASR pipeline onto a device.
+
+    Separate from transcription itself so a batch run can load the model once and
+    reuse it, rather than paying ~15 seconds per file.
+    """
     # Must happen before transformers is imported: its ASR pipeline imports
     # torchcodec unconditionally when the package is present, and a broken install
     # would otherwise abort the run. See common.neutralize_broken_torchcodec.
@@ -44,17 +49,28 @@ def transcribe(samples, rate, args, device) -> list[dict]:
     # in fp16 so this costs no accuracy. CPU has no usable fp16 path, hence fp32.
     dtype = torch.float16 if device.type == "cuda" else torch.float32
 
-    asr = pipeline(
+    return pipeline(
         "automatic-speech-recognition",
-        model=args.model,
+        model=model,
         device=device,
         dtype=dtype,
-        token=resolve_token(args.token),
+        token=resolve_token(token),
     )
 
+
+def run(
+    asr,
+    samples,
+    rate: int,
+    language: str = "sv",
+    chunk_length: float | None = None,
+    batch_size: int = 4,
+    offset: float = 0.0,
+) -> list[dict]:
+    """Transcribe samples into timestamped segments."""
     generate_kwargs = {"task": "transcribe"}
-    if args.language and args.language != "auto":
-        generate_kwargs["language"] = args.language
+    if language and language != "auto":
+        generate_kwargs["language"] = language
 
     # Two long-form strategies, and the default matters for both quality and
     # stability:
@@ -70,9 +86,9 @@ def transcribe(samples, rate, args, device) -> list[dict]:
     #
     # So: accurate and gentle by default, fast on request.
     options = {"return_timestamps": True, "generate_kwargs": generate_kwargs}
-    if args.chunk_length:
-        options["chunk_length_s"] = args.chunk_length
-        options["batch_size"] = args.batch_size
+    if chunk_length:
+        options["chunk_length_s"] = chunk_length
+        options["batch_size"] = batch_size
 
     # The dict form states the sample rate explicitly rather than relying on the
     # pipeline assuming a bare array is already at the model's rate.
@@ -88,11 +104,11 @@ def transcribe(samples, rate, args, device) -> list[dict]:
         # stops mid-utterance; fall back to Whisper's 30-second window rather than
         # dropping what is often a whole closing sentence.
         if end is None:
-            end = min(start + (args.chunk_length or 30.0), len(samples[0]) / rate)
+            end = min(start + (chunk_length or 30.0), len(samples[0]) / rate)
         segments.append(
             {
-                "start": round(start + args.offset, 3),
-                "end": round(end + args.offset, 3),
+                "start": round(start + offset, 3),
+                "end": round(end + offset, 3),
                 "text": text,
             }
         )
@@ -141,7 +157,16 @@ def main() -> None:
         print(f"Transcribing {format_timestamp(seconds)} with {args.model}", file=sys.stderr)
 
         started = time.perf_counter()
-        segments = transcribe(samples, rate, args, device)
+        asr = load_asr(args.model, device, args.token)
+        segments = run(
+            asr,
+            samples,
+            rate,
+            language=args.language,
+            chunk_length=args.chunk_length,
+            batch_size=args.batch_size,
+            offset=args.offset,
+        )
         elapsed = time.perf_counter() - started
 
     if args.output:

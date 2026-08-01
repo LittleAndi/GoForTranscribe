@@ -15,7 +15,8 @@ re-running those.
 | `diarize.py` | Stage 1 — who spoke when |
 | `transcribe.py` | Stage 2 — what was said |
 | `merge.py` | Stage 3 — joins the two by greatest temporal overlap |
-| `pipeline.py` | All three stages in one process, for when it just needs to run |
+| `pipeline.py` | All three stages in one process; `--file` or `--folder` for batches |
+| `notify.py` | Posts run summaries to a Discord webhook |
 | `stability.py` | Sweeps time offsets; the main guard against a meaningless result |
 | `evaluate.py` | DER against reference labels |
 | `make_control.py` | Builds a two-voice control with exact labels (Windows SAPI) |
@@ -26,6 +27,7 @@ uv sync                                    # create/refresh the venv from uv.loc
 uv run diarize.py --file audio.mp3 --output turns.json
 uv run transcribe.py --file audio.mp3 --output transcript.json
 uv run merge.py --turns turns.json --transcript transcript.json --timestamps
+uv run pipeline.py --folder podcasts\ --timestamps   # batch; one .txt per input
 uv run stability.py --file audio.mp3       # is the answer real, or a coin flip?
 ```
 

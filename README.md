@@ -54,6 +54,26 @@ The whole chain in one command:
 uv run pipeline.py --file episode.mp3 --output episode.txt --timestamps
 ```
 
+Or a whole folder, writing `<name>.txt` beside each input:
+
+```powershell
+uv run pipeline.py --folder podcasts\ --timestamps
+uv run pipeline.py --folder podcasts\ --output-dir transcripts\ --recursive
+```
+
+A batch loads each model **once** rather than once per file, which is why it runs in two passes —
+diarize everything, then transcribe everything. On ten episodes that is two model loads instead
+of twenty. Files that already have a `.txt` are skipped unless `--overwrite` is passed, so an
+interrupted batch resumes where it stopped, and one unreadable file is reported at the end rather
+than killing the run.
+
+`--recursive` descends into subdirectories, and the structure is mirrored in `--output-dir` so
+two files with the same name in different folders cannot overwrite each other.
+
+> **`--language` applies to every file in the batch.** It defaults to `sv`, and Whisper will
+> quietly *translate* rather than refuse: an English recording transcribed with `--language sv`
+> comes back as fluent Swedish. For a mixed-language folder use `--language auto`.
+
 Or one stage at a time, which is what you want while iterating — each stage's output can be
 inspected, and the expensive stages need not be repeated:
 
