@@ -1,0 +1,24 @@
+[project]
+name = "gofortranscribe"
+version = "0.1.0"
+description = "Speaker-attributed transcription: who spoke when, then what they said."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pyannote-audio>=3.3",
+    "torch>=2.7",
+    "torchaudio>=2.7",
+]
+
+# The RTX 5060 Ti is Blackwell (sm_120). Default PyPI torch wheels carry kernels
+# only up to sm_90 and will either raise "no kernel image is available for
+# execution on the device" or fall back to CPU without saying so, which is worse.
+# Pinning the CUDA 12.8 index is what makes GPU work on this hardware at all.
+# On a machine without an NVIDIA GPU these wheels still install and run on CPU.
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

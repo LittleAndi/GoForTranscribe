@@ -26,6 +26,12 @@ appsettings*.json
 !appsettings.example.json
 *.local.json
 
+# Machine-specific notes: absolute paths, sample media locations, tokens.
+# Kept local so they never reach the remote.
+CLAUDE.local.md
+*.local.md
+samples/
+
 # .NET
 bin/
 obj/

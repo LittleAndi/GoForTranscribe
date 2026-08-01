@@ -4,16 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-The repository is **empty** — no code, no `git init` yet. There is nothing to build, lint, or
-test, so this file describes the goal and the prior art rather than commands that do not exist
-yet. Add build/run/test commands here as soon as the first project is scaffolded.
+Stage 1 (diarization) exists as a spike: `diarize.py`, on pyannote.audio. Transcription, merging,
+and the stability harness are not written yet. There are no tests.
 
-Remote to push to (already created, empty): `https://github.com/LittleAndi/GoForTranscribe.git`
+```powershell
+uv sync                                    # create/refresh the venv from uv.lock
+uv run diarize.py --file audio.mp3 --speakers 2
+uv run diarize.py --file audio.mp3 --output turns.json      # or .rttm
+uv run diarize.py --file audio.mp3 --offset 0.05            # one point of a stability sweep
+uv run diarize.py --file audio.mp3 --device cpu             # force the CPU path
+```
+
+A Hugging Face token is required — see [Gated models](#gated-models).
 
 ## Goal
 
-**Speaker diarization first, transcription second.** The sibling project the sibling GoForWhisper checkout
-already does plain transcription well; the point of this project is to find the *best* way to
+**Speaker diarization first, transcription second.** The sibling project
+[GoForWhisper](https://github.com/LittleAndi/GoForWhisper) — checked out locally alongside this
+one — already does plain transcription well; the point of this project is to find the *best* way to
 answer "who spoke when", then attach transcribed text to each identified speaker.
 
 Diarization quality is the deliverable. Transcription is a solved dependency, not the problem
@@ -35,9 +43,10 @@ Constraints from the project owner:
 
 ## Prior art: GoForWhisper — read this before choosing an approach
 
-the sibling GoForWhisper checkout is a .NET 10 CLI (Whisper.net + sherpa-onnx) that already implements a
-full diarization pipeline. **Its `README.md` contains measured reliability data that should
-directly shape decisions here — read it rather than re-discovering the same failures.**
+[GoForWhisper](https://github.com/LittleAndi/GoForWhisper) is a .NET 10 CLI (Whisper.net +
+sherpa-onnx) that already implements a full diarization pipeline. **Its `README.md` contains
+measured reliability data that should directly shape decisions here — read it rather than
+re-discovering the same failures.** `CLAUDE.local.md` records where it sits on this machine.
 
 What it established:
 
@@ -89,19 +98,24 @@ needs a repeatable measurement, not eyeballing. At minimum:
 
 ## Environment (verified on this machine)
 
-| Tool          | Version / path                                            |
-| ------------- | --------------------------------------------------------- |
-| .NET          | 10.0.110                                                  |
-| Python        | 3.11.9                                                    |
-| uv            | 0.6.9 (`on PATH`)                        |
-| ffmpeg        | `on PATH`                           |
-| gh            | installed                                                 |
+| Tool          | Version                                                               |
+| ------------- | --------------------------------------------------------------------- |
+| .NET          | 10.0.110                                                              |
+| Python        | 3.11                                                                  |
+| uv            | 0.6.9                                                                 |
+| ffmpeg        | on `PATH`                                                             |
+| gh            | installed                                                             |
 | GPU 1         | NVIDIA RTX 5060 Ti, 16 GB, **compute capability 12.0**, driver 610.47 |
-| GPU 0         | AMD Radeon integrated                                     |
-| CUDA toolkits | 12.9 and 13.3 installed; `nvcc` on `PATH` is 12.9         |
+| GPU 0         | AMD Radeon integrated                                                 |
+| CUDA toolkits | 12.9 and 13.3 installed; `nvcc` on `PATH` is 12.9                     |
 
 Shell is PowerShell 7 on Windows 11. Use `uv` for Python dependency management rather than bare
 `pip`/`venv`.
+
+**Machine-specific paths do not belong in this file.** Absolute paths, sample-audio locations,
+and anything else particular to one developer's machine go in `CLAUDE.local.md`, which is
+gitignored. Read it if present; keep its contents out of anything committed. Secrets — the
+Hugging Face token above all — live in the environment and never in a tracked file.
 
 ## GPU — offload by default, degrade gracefully
 
@@ -164,6 +178,39 @@ already been measured sitting on a decision boundary where inaudible perturbatio
 outcome. So for **evaluation** runs, remove that variable: fix seeds, and consider disabling TF32
 (`torch.backends.cuda.matmul.allow_tf32 = False`) so embeddings are computed in full fp32.
 Otherwise a config change and a numerical coin flip are indistinguishable in the results.
+
+## Implementation notes worth knowing before editing `diarize.py`
+
+Three things here are load-bearing and look like arbitrary choices:
+
+- **pyannote installed is 4.0.7, not the 3.1 that most documentation describes.** The API moved:
+  `Pipeline.from_pretrained` takes `token=`, not `use_auth_token=`, and the pipeline returns a
+  `DiarizeOutput` rather than an `Annotation`. That object carries **two** annotations, and the
+  distinction matters for this project: `exclusive_speaker_diarization` has overlapping speech
+  removed and is documented as the one meant for downstream transcription, so it is the default
+  here; `speaker_diarization` keeps overlaps and is behind `--overlapping`.
+- **The default checkpoint is `pyannote/speaker-diarization-community-1`**, which is what 4.x
+  recommends — `speaker-diarization-3.1` is the older generation.
+- **Audio is decoded by ffmpeg and handed to the pipeline as an in-memory waveform dict, never
+  as a path.** pyannote's own file reading goes through torchcodec, whose native libraries do not
+  load on this Windows setup (`libtorchcodec_core*.dll` fails for every ffmpeg version it tries).
+  Passing a waveform sidesteps the broken decoder entirely, which is why the tool works without
+  repairing torchcodec. It also makes `--offset` exact and keeps input-format support broad.
+  Reading the WAV uses stdlib `wave` plus numpy, so it adds no dependency. **Do not "simplify"
+  this by passing the file path — it will break.**
+
+### Gated models
+
+pyannote's checkpoints require accepting terms on Hugging Face and a read token:
+
+```powershell
+$env:HF_TOKEN = "hf_..."
+```
+
+The token is read from `$HF_TOKEN`/`$HUGGINGFACE_TOKEN` or `--token`, and must never be written
+to a tracked file. Note that `Pipeline.from_pretrained` returns `None` — rather than raising —
+when the token is valid but the model's terms have not been accepted; `diarize.py` detects that
+case and says so, because the bare `None` is otherwise a baffling failure.
 
 ## Repository hygiene
 
