@@ -219,8 +219,16 @@ recording, or a labelled reference, distinguishes those. Sanity-check a suspicio
 a longer window before concluding anything from it.
 
 Convergence to ~50/50 over 38 minutes is decent evidence the attribution is broadly right — a
-systematic misassignment would be unlikely to average out that cleanly — but it is still not
-ground truth. Use `sample_turns.py` to cut per-speaker clips and confirm by ear.
+systematic misassignment would be unlikely to average out that cleanly.
+
+**Confirmed by ear.** Six clips per speaker, spread from 0:00 to 32:42 and cut with
+`sample_turns.py`, were listened through: each speaker's folder is consistently one voice. So on
+this episode pyannote is not merely stable, it is correct — which is exactly what the sherpa-onnx
+stack could not manage on this same material.
+
+**This is the reference result for the project.** Any future change to the diarization stage
+should reproduce it: full episode, automatic counting, 2 speakers, ~52/48, and clips that hold up
+by ear.
 
 Throughput: the full episode diarized in **69 seconds on the GPU**, roughly 33x realtime.
 
