@@ -4,18 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Stage 1 (diarization) exists as a spike: `diarize.py`, on pyannote.audio. Transcription, merging,
-and the stability harness are not written yet. There are no tests.
+All three pipeline stages work, plus the evaluation tooling. **There are no unit tests** — the
+project is verified by measurement instead (stability sweep, control DER, listening), which is
+the appropriate check for this kind of work but does mean a refactor has no safety net beyond
+re-running those.
+
+| File | Role |
+| --- | --- |
+| `common.py` | Shared audio decoding, device selection, torchcodec workaround |
+| `diarize.py` | Stage 1 — who spoke when |
+| `transcribe.py` | Stage 2 — what was said |
+| `merge.py` | Stage 3 — joins the two by greatest temporal overlap |
+| `stability.py` | Sweeps time offsets; the main guard against a meaningless result |
+| `evaluate.py` | DER against reference labels |
+| `make_control.py` | Builds a two-voice control with exact labels (Windows SAPI) |
+| `sample_turns.py` | Cuts per-speaker clips for listening |
 
 ```powershell
 uv sync                                    # create/refresh the venv from uv.lock
-uv run diarize.py --file audio.mp3 --speakers 2
-uv run diarize.py --file audio.mp3 --output turns.json      # or .rttm
-uv run diarize.py --file audio.mp3 --offset 0.05            # one point of a stability sweep
-uv run diarize.py --file audio.mp3 --device cpu             # force the CPU path
+uv run diarize.py --file audio.mp3 --output turns.json
+uv run transcribe.py --file audio.mp3 --output transcript.json
+uv run merge.py --turns turns.json --transcript transcript.json --timestamps
+uv run stability.py --file audio.mp3       # is the answer real, or a coin flip?
 ```
 
 A Hugging Face token is required — see [Gated models](#gated-models).
+
+**Reproducing the reference result** after any change to the diarization stage:
+
+```powershell
+uv run make_control.py
+uv run diarize.py --file samples\control.wav --output out\control.json
+uv run evaluate.py --reference samples\control-reference.json --hypothesis out\control.json
+```
+
+Expect DER near 1.3% with 0.00% confusion. Confusion above zero on the control means the change
+broke attribution.
 
 ## Goal
 
@@ -259,13 +283,23 @@ Three things here are load-bearing and look like arbitrary choices:
   here; `speaker_diarization` keeps overlaps and is behind `--overlapping`.
 - **The default checkpoint is `pyannote/speaker-diarization-community-1`**, which is what 4.x
   recommends — `speaker-diarization-3.1` is the older generation.
-- **Audio is decoded by ffmpeg and handed to the pipeline as an in-memory waveform dict, never
-  as a path.** pyannote's own file reading goes through torchcodec, whose native libraries do not
-  load on this Windows setup (`libtorchcodec_core*.dll` fails for every ffmpeg version it tries).
-  Passing a waveform sidesteps the broken decoder entirely, which is why the tool works without
-  repairing torchcodec. It also makes `--offset` exact and keeps input-format support broad.
-  Reading the WAV uses stdlib `wave` plus numpy, so it adds no dependency. **Do not "simplify"
-  this by passing the file path — it will break.**
+- **Audio is decoded by ffmpeg and handed to the models as an in-memory array, never as a path**
+  (`common.decode` / `common.load_waveform`). Library-side decoding goes through torchcodec,
+  whose native libraries do not load here: torchcodec needs FFmpeg's *shared* libraries, and the
+  usual Windows "essentials" ffmpeg build is static — it satisfies the CLI we call but ships no
+  DLLs. Passing samples sidesteps the broken decoder entirely. It also makes `--offset` exact and
+  keeps input-format support broad. Reading the WAV uses stdlib `wave` plus numpy, so it adds no
+  dependency. **Do not "simplify" this by passing a file path — it will break.**
+- **`common.neutralize_broken_torchcodec()` must be called before importing transformers or
+  pyannote.** pyannote survives the broken import but prints a 40-line traceback on every run;
+  transformers does not survive it at all — its ASR pipeline asks `is_torchcodec_available()`,
+  gets "yes" because the package is installed (pyannote depends on it, so it always is), imports
+  it, and dies. The stub makes the import succeed and the one `isinstance` check against
+  `AudioDecoder` return False, which is correct for our inputs. A working torchcodec is preferred
+  and used when present; installing a shared-libraries FFmpeg build would make this a no-op.
+- **transformers 5 renamed `torch_dtype` to `dtype`.** Most Whisper examples online still use the
+  old name, which is silently ignored rather than rejected — leaving the model in fp32 at half
+  the speed.
 
 ### Gated models
 
