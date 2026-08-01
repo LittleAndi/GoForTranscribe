@@ -162,6 +162,33 @@ def select_device(requested: str):
     return torch.device("cuda")
 
 
+def check_vram(device, needed_gb: float = 4.0) -> None:
+    """Warn when the GPU is too full to take a model comfortably.
+
+    This card also drives a desktop session, and browsers, chat apps and media
+    players all hold VRAM. When an allocation no longer fits, Windows spills it
+    into system memory and the resulting thrashing can hang the machine outright
+    rather than raising a clean out-of-memory error — so a warning here is worth
+    more than the exception you would otherwise not get.
+    """
+    import torch
+
+    if device.type != "cuda":
+        return
+
+    free, total = torch.cuda.mem_get_info()
+    free_gb, total_gb = free / 1024**3, total / 1024**3
+    print(f"VRAM: {free_gb:.1f} GB free of {total_gb:.1f} GB", file=sys.stderr)
+
+    if free_gb < needed_gb:
+        print(
+            f"warning: only {free_gb:.1f} GB free, which may not be enough.\n"
+            "         Close GPU-using apps (browsers, Discord, Spotify), lower\n"
+            "         --batch-size, or pass --device cpu.",
+            file=sys.stderr,
+        )
+
+
 def make_deterministic(seed: int) -> None:
     """Remove numerical variation between runs.
 

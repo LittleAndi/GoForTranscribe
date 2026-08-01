@@ -17,7 +17,14 @@ from pathlib import Path
 
 import diarize
 import transcribe as transcribe_stage
-from common import fail, format_timestamp, make_deterministic, resolve_token, select_device
+from common import (
+    check_vram,
+    fail,
+    format_timestamp,
+    make_deterministic,
+    resolve_token,
+    select_device,
+)
 from merge import UNKNOWN, collapse, merge, render
 
 
@@ -49,8 +56,12 @@ def main() -> None:
     )
     parser.add_argument("--diarization-model", default=diarize.DEFAULT_MODEL)
     parser.add_argument("--asr-model", default=transcribe_stage.DEFAULT_MODEL)
-    parser.add_argument("--chunk-length", type=float, default=30.0)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument(
+        "--chunk-length",
+        type=float,
+        help="chunked long-form decoding: faster, less accurate, much more VRAM",
+    )
+    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     parser.add_argument("--token")
     parser.add_argument("--seed", type=int, default=0)
@@ -67,6 +78,7 @@ def main() -> None:
     if not args.nondeterministic:
         make_deterministic(args.seed)
     device = select_device(args.device)
+    check_vram(device)
 
     print("[1/3] Diarizing", flush=True)
     constraints = {

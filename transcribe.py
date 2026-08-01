@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from common import (
+    check_vram,
     fail,
     decode,
     format_timestamp,
@@ -55,15 +56,27 @@ def transcribe(samples, rate, args, device) -> list[dict]:
     if args.language and args.language != "auto":
         generate_kwargs["language"] = args.language
 
+    # Two long-form strategies, and the default matters for both quality and
+    # stability:
+    #
+    # Sequential (no chunk_length) is Whisper's own algorithm — it carries context
+    # across 30-second windows and picks its own boundaries. transformers warns
+    # that chunking a seq2seq model "will not necessarily be entirely accurate".
+    #
+    # Chunked (--chunk-length) cuts fixed windows and decodes several at once. It
+    # is faster on long audio but holds batch_size windows of activations at once,
+    # which on a 16 GB card shared with a desktop session is enough to exhaust
+    # VRAM, spill into system memory, and bring the machine to its knees.
+    #
+    # So: accurate and gentle by default, fast on request.
+    options = {"return_timestamps": True, "generate_kwargs": generate_kwargs}
+    if args.chunk_length:
+        options["chunk_length_s"] = args.chunk_length
+        options["batch_size"] = args.batch_size
+
     # The dict form states the sample rate explicitly rather than relying on the
     # pipeline assuming a bare array is already at the model's rate.
-    result = asr(
-        {"raw": samples[0], "sampling_rate": rate},
-        chunk_length_s=args.chunk_length,
-        batch_size=args.batch_size,
-        return_timestamps=True,
-        generate_kwargs=generate_kwargs,
-    )
+    result = asr({"raw": samples[0], "sampling_rate": rate}, **options)
 
     segments = []
     for chunk in result.get("chunks", []):
@@ -72,10 +85,10 @@ def transcribe(samples, rate, args, device) -> list[dict]:
         if start is None or not text:
             continue
         # The final chunk can come back without an end timestamp when the audio
-        # stops mid-utterance; fall back to the chunk length rather than dropping
-        # what is often a whole closing sentence.
+        # stops mid-utterance; fall back to Whisper's 30-second window rather than
+        # dropping what is often a whole closing sentence.
         if end is None:
-            end = min(start + args.chunk_length, len(samples[0]) / rate)
+            end = min(start + (args.chunk_length or 30.0), len(samples[0]) / rate)
         segments.append(
             {
                 "start": round(start + args.offset, 3),
@@ -94,12 +107,16 @@ def main() -> None:
     parser.add_argument("--language", default="sv", help="'auto' to let the model decide")
     parser.add_argument("--offset", type=float, default=0.0, help="skip this many seconds")
     parser.add_argument("--duration", type=float, help="only process this many seconds")
-    parser.add_argument("--chunk-length", type=float, default=30.0)
+    parser.add_argument(
+        "--chunk-length",
+        type=float,
+        help="switch to chunked long-form decoding: faster, less accurate, much more VRAM",
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=8,
-        help="chunks decoded in parallel; raise to use more VRAM, lower if out of memory",
+        default=4,
+        help="chunks decoded at once; only used with --chunk-length. Each one costs VRAM",
     )
     parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     parser.add_argument("--token", help="Hugging Face token (default: stored login)")
@@ -114,6 +131,7 @@ def main() -> None:
         make_deterministic(args.seed)
 
     device = select_device(args.device)
+    check_vram(device)
 
     with tempfile.TemporaryDirectory() as workspace:
         decoded = Path(workspace) / "audio.wav"
