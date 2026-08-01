@@ -54,6 +54,7 @@ venv/
 # uv.lock is committed on purpose — this is an application, not a library
 
 # Editors and OS
+.claude/
 .idea/
 Thumbs.db
 .DS_Store
