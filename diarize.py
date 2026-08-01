@@ -64,7 +64,7 @@ def resolve_token(explicit: str | None) -> str:
     return token
 
 
-def decode(source: Path, dest: Path, offset: float) -> None:
+def decode(source: Path, dest: Path, offset: float, duration: float | None) -> None:
     """Decode to 16 kHz mono 16-bit WAV, the form both pipeline stages want.
 
     Going through ffmpeg rather than letting pyannote read the file keeps input
@@ -76,6 +76,8 @@ def decode(source: Path, dest: Path, offset: float) -> None:
     command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
     if offset:
         command += ["-ss", f"{offset}"]
+    if duration:
+        command += ["-t", f"{duration}"]
     command += [
         "-i", str(source),
         "-ac", "1",
@@ -223,6 +225,11 @@ def main() -> None:
         help="skip this many seconds of audio; for stability runs (see CLAUDE.md)",
     )
     parser.add_argument(
+        "--duration",
+        type=float,
+        help="only process this many seconds, so a window can exclude intros and ads",
+    )
+    parser.add_argument(
         "--overlapping",
         action="store_true",
         help="keep overlapping speech turns; default excludes them, for the merge stage",
@@ -279,7 +286,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as workspace:
         decoded = Path(workspace) / "audio.wav"
-        decode(args.file, decoded, args.offset)
+        decode(args.file, decoded, args.offset, args.duration)
         audio = load_waveform(decoded)
         with ProgressHook() as hook:
             result = pipeline(audio, hook=hook, **constraints)

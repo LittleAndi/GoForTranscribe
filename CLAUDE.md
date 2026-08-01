@@ -192,6 +192,9 @@ each speaker:
 
 **Spread of 0.5 points versus the old stack's coin flip between 3 and 62.** On this audio the
 approach is no longer the source of variance, which is the single biggest reason to prefer it.
+(The ~76 figure is an artefact of this short window — see
+[below](#the-7624-was-the-excerpt-not-the-diarizer). What matters in this table is the spread
+across a row, not its level.)
 
 **Automatic speaker counting also works here.** Run without `--speakers`, pyannote finds exactly
 2 and returns an identical split — where threshold-based estimation in the old stack produced 39
@@ -202,11 +205,36 @@ Structure of the baseline run: 119 turns, 51 speaker changes, mean turn 2.1 s an
 two speakers. That is a genuine back-and-forth, not the collapse signature (one speaker holding
 nearly all the time with few changes).
 
-**What this does not establish.** Stability is not accuracy. A 76/24 split is consistent with one
-host leading this particular segment, and the healthy alternation supports that, but nothing here
-verifies attribution against ground truth — a systematic misassignment would look exactly this
-stable. Confirming accuracy needs either spot-listening to sampled turns or labelled reference
-audio and a DER measurement. Treat 76/24 as "reproducible", not yet as "correct".
+### The 76/24 was the excerpt, not the diarizer
+
+Run over the **full 38-minute episode** with automatic counting, the same pipeline returns
+**51.7 / 48.3 across 819 turns** — an almost perfectly balanced two-host split, and still exactly
+2 speakers. The lopsided 76/24 was a property of the 6-minute window, where one host happened to
+be leading the topic; it is not a misattribution.
+
+This is worth remembering as a methodology lesson: **speech-time share on a short excerpt is a
+collapse detector, not an accuracy measure.** It catches the catastrophic failure (one cluster
+eating everything) but says nothing about whether a merely-lopsided split is real. Only the full
+recording, or a labelled reference, distinguishes those. Sanity-check a suspicious ratio against
+a longer window before concluding anything from it.
+
+Convergence to ~50/50 over 38 minutes is decent evidence the attribution is broadly right — a
+systematic misassignment would be unlikely to average out that cleanly — but it is still not
+ground truth. Use `sample_turns.py` to cut per-speaker clips and confirm by ear.
+
+Throughput: the full episode diarized in **69 seconds on the GPU**, roughly 33x realtime.
+
+### Intros and ads
+
+Podcast intros and ad reads introduce voices that are not the hosts, and **ads can appear
+anywhere in an episode**, not just at the start. That makes an exact `--speakers n` actively
+dangerous on real material: pyannote does not discard the extra voice, it folds it into one of
+the clusters you allowed, corrupting the split.
+
+**Prefer automatic counting, or `--min-speakers`/`--max-speakers`, over an exact count** unless
+the audio is known to be clean. On this episode automatic counting found 2 in every window
+tested, including the intro — so the intro voice is not spawning a spurious cluster here. (This
+particular episode carries no ads.)
 
 Still missing: a **control** recording of two clearly distinct voices, and a scripted stability
 harness (the sweep above was run by hand).
