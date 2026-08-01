@@ -179,6 +179,38 @@ outcome. So for **evaluation** runs, remove that variable: fix seeds, and consid
 (`torch.backends.cuda.matmul.allow_tf32 = False`) so embeddings are computed in full fp32.
 Otherwise a config change and a numerical coin flip are indistinguishable in the results.
 
+## First measured result — pyannote is stable where sherpa-onnx was not
+
+Measured on a 6-minute excerpt of the same Swedish two-host podcast that broke the sherpa-onnx
+stack, speaker count fixed at 2, varying only the time offset. Share of speech time given to
+each speaker:
+
+| Offset          | 0 ms | 3 ms | 6 ms | 12 ms | 24 ms | 50 ms | 100 ms | 250 ms |
+| --------------- | ---- | ---- | ---- | ----- | ----- | ----- | ------ | ------ |
+| pyannote 4.0.7  | 76.5 | 76.0 | 76.1 | 76.1  | 76.2  | 76.2  | 76.1   | 76.5   |
+| sherpa (before) | 58   | 3    | 3    | 55    | 58    | 58    | 58     | 62     |
+
+**Spread of 0.5 points versus the old stack's coin flip between 3 and 62.** On this audio the
+approach is no longer the source of variance, which is the single biggest reason to prefer it.
+
+**Automatic speaker counting also works here.** Run without `--speakers`, pyannote finds exactly
+2 and returns an identical split — where threshold-based estimation in the old stack produced 39
+speakers on a comparable episode. The count no longer has to be supplied to get a sane result,
+though supplying it is still free insurance.
+
+Structure of the baseline run: 119 turns, 51 speaker changes, mean turn 2.1 s and 2.8 s for the
+two speakers. That is a genuine back-and-forth, not the collapse signature (one speaker holding
+nearly all the time with few changes).
+
+**What this does not establish.** Stability is not accuracy. A 76/24 split is consistent with one
+host leading this particular segment, and the healthy alternation supports that, but nothing here
+verifies attribution against ground truth — a systematic misassignment would look exactly this
+stable. Confirming accuracy needs either spot-listening to sampled turns or labelled reference
+audio and a DER measurement. Treat 76/24 as "reproducible", not yet as "correct".
+
+Still missing: a **control** recording of two clearly distinct voices, and a scripted stability
+harness (the sweep above was run by hand).
+
 ## Implementation notes worth knowing before editing `diarize.py`
 
 Three things here are load-bearing and look like arbitrary choices:

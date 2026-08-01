@@ -34,7 +34,21 @@ def fail(message: str, *, hint: str | None = None) -> NoReturn:
 
 
 def resolve_token(explicit: str | None) -> str:
-    token = explicit or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+    """Find a Hugging Face credential.
+
+    Prefers a stored login over an environment variable, because `hf auth login`
+    persists across shells and keeps the token off command lines and out of
+    process listings. `huggingface_hub.get_token()` covers the login cache and the
+    standard variables; the explicit ones are checked first only so --token wins.
+    """
+    from huggingface_hub import get_token
+
+    token = (
+        explicit
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGINGFACE_TOKEN")
+        or get_token()
+    )
     if not token:
         fail(
             "no Hugging Face token",
@@ -42,8 +56,9 @@ def resolve_token(explicit: str | None) -> str:
                 "pyannote's models are gated. One-time setup:\n"
                 f"  1. Accept the terms at https://hf.co/{DEFAULT_MODEL}\n"
                 "  2. Create a read token at https://hf.co/settings/tokens\n"
-                '  3. $env:HF_TOKEN = "hf_..."   (or pass --token)\n'
-                "\nKeep the token in the environment — never in a committed file."
+                "  3. uv run hf auth login\n"
+                "\nA stored login persists across shells. Setting $env:HF_TOKEN works too,\n"
+                "but only for processes started afterwards. Never commit the token."
             ),
         )
     return token
