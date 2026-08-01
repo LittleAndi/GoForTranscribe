@@ -32,8 +32,14 @@ ruled out [pyannote.audio](https://github.com/pyannote/pyannote-audio) — the r
 implementation, whose overlap-aware clustering is materially more robust. **This project has no
 such constraint**, so pyannote.audio is the first thing to evaluate.
 
-Python and .NET are both fair game, chosen per component. The structure stays as simple as the
-problem allows.
+The deliverable is a **command-line tool** — or a small set of them, one per pipeline stage, so
+intermediate results can be inspected and re-run without redoing the whole chain. Python and
+.NET are both fair game, chosen per component. The structure stays as simple as the problem
+allows.
+
+Work is **offloaded to the GPU wherever possible** — chiefly because it makes the multi-run
+stability checks below cheap enough to actually perform, and affords the heavier models that do
+better on hard audio. It is never required: everything falls back to CPU.
 
 Whichever stack wins, the shape of the pipeline is the same:
 

@@ -21,9 +21,17 @@ being worked on.
 
 Constraints from the project owner:
 
+- **Ship CLI tools.** Not a library, not a service, not a notebook — command-line programs that
+  take an audio file and produce a speaker-attributed transcript. More than one tool is fine and
+  expected: the pipeline stages (preprocess, diarize, transcribe, merge) and the evaluation
+  harness are each reasonable candidates for their own command, so intermediate results can be
+  inspected and re-run without redoing the whole chain.
 - Python and/or .NET are both acceptable — pick per component, not per dogma.
 - Keep the structure **as simple as possible**. No premature layering, no solution-per-concern
   sprawl. Prefer one project/one script until there is a real reason to split.
+- **Offload to the GPU wherever possible**, but never require it — see
+  [GPU](#gpu--offload-by-default-degrade-gracefully). Code must still run on a machine without
+  this hardware.
 
 ## Prior art: GoForWhisper — read this before choosing an approach
 
@@ -81,16 +89,81 @@ needs a repeatable measurement, not eyeballing. At minimum:
 
 ## Environment (verified on this machine)
 
-| Tool    | Version / path                    |
-| ------- | --------------------------------- |
-| .NET    | 10.0.110                          |
-| Python  | 3.11.9                            |
-| uv      | 0.6.9 (`on PATH`) |
-| ffmpeg  | `on PATH`   |
-| gh      | installed                         |
+| Tool          | Version / path                                            |
+| ------------- | --------------------------------------------------------- |
+| .NET          | 10.0.110                                                  |
+| Python        | 3.11.9                                                    |
+| uv            | 0.6.9 (`on PATH`)                        |
+| ffmpeg        | `on PATH`                           |
+| gh            | installed                                                 |
+| GPU 1         | NVIDIA RTX 5060 Ti, 16 GB, **compute capability 12.0**, driver 610.47 |
+| GPU 0         | AMD Radeon integrated                                     |
+| CUDA toolkits | 12.9 and 13.3 installed; `nvcc` on `PATH` is 12.9         |
 
 Shell is PowerShell 7 on Windows 11. Use `uv` for Python dependency management rather than bare
 `pip`/`venv`.
+
+## GPU — offload by default, degrade gracefully
+
+Prefer GPU execution everywhere it is available, but **always fall back to CPU** rather than
+hard-failing. Nothing here may assume this specific rig.
+
+### The Blackwell trap — read before installing PyTorch
+
+The RTX 5060 Ti is **Blackwell, compute capability 12.0 (`sm_120`)**. A default
+`uv add torch` / `pip install torch` pulls a build whose kernels stop at `sm_90`, and it will
+fail at runtime with *"no kernel image is available for execution on the device"* — or silently
+sit on the CPU. **PyTorch must come from a CUDA 12.8-or-newer index:**
+
+```powershell
+uv add torch torchaudio --index https://download.pytorch.org/whl/cu128
+```
+
+The installed CUDA *toolkits* are irrelevant to PyTorch — the wheel ships its own CUDA runtime,
+and only the driver (610.47, new enough) matters. The toolkits matter only for native code that
+links against them: Whisper.net 1.9.1 needs the **13.x** toolkit specifically, which is why
+`v13.3` is installed alongside `v12.9`.
+
+Always verify rather than assume, since the failure mode is a silent CPU fallback:
+
+```powershell
+uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))"
+```
+
+### Device selection
+
+The AMD part is an integrated display adapter, not a compute target — PyTorch on Windows has no
+ROCm build, so **do not try to use it for diarization**. Its usefulness is that it can drive the
+displays, leaving the full 16 GB free. Select the NVIDIA card explicitly (`cuda:0` is correct
+once CUDA enumerates only the NVIDIA device; `CUDA_VISIBLE_DEVICES` pins it if that ever changes)
+and expose a `--device` flag defaulting to auto-detect.
+
+For the .NET side, GoForWhisper measured **Vulkan at ~9.4x realtime versus CUDA at ~8.0x on this
+exact GPU** — ggml's Vulkan backend uses cooperative-matrix instructions on Blackwell. Do not
+assume CUDA wins; measure.
+
+### What the GPU actually buys, given the quality focus
+
+Be honest about the mechanism: **for a fixed model and fixed settings, the GPU changes speed, not
+accuracy.** It serves the quality goal indirectly, and those indirect routes are the point:
+
+1. **It makes the stability protocol affordable.** The single most important finding carried over
+   from GoForWhisper is that one run proves nothing — a config must be re-run at several time
+   offsets to see whether it is stable. That is an N-times-the-work evaluation, and on CPU it is
+   expensive enough that it quietly stops being done. On GPU it is cheap, so it actually happens.
+2. **It affords heavier models.** Overlap-aware pyannote pipelines and large ASR models are the
+   quality-relevant choices, and they are the ones CPU inference makes impractical.
+3. **16 GB fits diarization and ASR resident at once**, so a single pass over long audio does not
+   have to page models in and out.
+
+### GPU non-determinism interacts badly with the knife-edge instability
+
+TF32 matmuls and cuDNN algorithm selection make GPU results non-bit-identical to CPU, and
+non-identical between runs. Normally irrelevant — but clustering on similar-sounding voices has
+already been measured sitting on a decision boundary where inaudible perturbations flip the
+outcome. So for **evaluation** runs, remove that variable: fix seeds, and consider disabling TF32
+(`torch.backends.cuda.matmul.allow_tf32 = False`) so embeddings are computed in full fp32.
+Otherwise a config change and a numerical coin flip are indistinguishable in the results.
 
 ## Repository hygiene
 
