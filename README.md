@@ -149,6 +149,27 @@ Other results on the same material:
   speaker.
 - **Throughput**: the full episode diarizes in 69 seconds on an RTX 5060 Ti, about 33x realtime.
 
+### End to end
+
+The full 38-minute episode through `pipeline.py`:
+
+| | |
+| --- | --- |
+| Speakers found | 2, automatically |
+| Diarization turns | 819 |
+| Transcript segments | 633 |
+| Output blocks | 127 |
+| Unattributed | 1 segment — a one-second "Tack!" outside detected speech |
+| Peak VRAM | 6.5 GB |
+
+The unattributed segment is the intended behaviour rather than a miss: a transcript segment
+overlapping no detected speech is left unlabelled instead of being forced onto the nearest
+speaker.
+
+Note when reading the output that blocks always alternate between speakers — consecutive
+segments from one speaker are merged into a single block, so alternation is a property of the
+formatting, not evidence about the diarization.
+
 ### Ads and intros
 
 Podcast intros and ad reads contain voices that are not the hosts, and ads can appear anywhere in
