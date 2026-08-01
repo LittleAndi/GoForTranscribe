@@ -71,7 +71,7 @@ than killing the run.
 two files with the same name in different folders cannot overwrite each other.
 
 > **`--language` applies to every file in the batch.** It defaults to `sv`, and Whisper will
-> quietly *translate* rather than refuse: an English recording transcribed with `--language sv`
+> quietly _translate_ rather than refuse: an English recording transcribed with `--language sv`
 > comes back as fluent Swedish. For a mixed-language folder use `--language auto`.
 
 Or one stage at a time, which is what you want while iterating — each stage's output can be
@@ -90,17 +90,17 @@ uv run merge.py --turns turns.json --transcript transcript.json --timestamps --o
 
 Useful flags:
 
-| Flag | Stage | Effect |
-| --- | --- | --- |
-| `--speakers n` | diarize | Fix the speaker count. **Avoid unless the audio is clean** — see [Ads and intros](#ads-and-intros) |
-| `--min-speakers` / `--max-speakers` | diarize | Bound the count without fixing it |
-| `--offset` / `--duration` | diarize, transcribe | Work on a window rather than the whole file |
-| `--language` | transcribe | Defaults to `sv`; `auto` lets the model decide |
-| `--chunk-length` | transcribe | Switch to chunked decoding — see [Memory](#memory) |
-| `--model` | both | Any compatible checkpoint |
-| `--device` | both | `auto`, `cuda`, or `cpu` |
-| `--timestamps` | merge | Prefix each line with its time range |
-| `--keep-intermediate` | pipeline | Also save the per-stage JSON |
+| Flag                                | Stage               | Effect                                                                                             |
+| ----------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------- |
+| `--speakers n`                      | diarize             | Fix the speaker count. **Avoid unless the audio is clean** — see [Ads and intros](#ads-and-intros) |
+| `--min-speakers` / `--max-speakers` | diarize             | Bound the count without fixing it                                                                  |
+| `--offset` / `--duration`           | diarize, transcribe | Work on a window rather than the whole file                                                        |
+| `--language`                        | transcribe          | Defaults to `sv`; `auto` lets the model decide                                                     |
+| `--chunk-length`                    | transcribe          | Switch to chunked decoding — see [Memory](#memory)                                                 |
+| `--model`                           | both                | Any compatible checkpoint                                                                          |
+| `--device`                          | both                | `auto`, `cuda`, or `cpu`                                                                           |
+| `--timestamps`                      | merge               | Prefix each line with its time range                                                               |
+| `--keep-intermediate`               | pipeline            | Also save the per-stage JSON                                                                       |
 
 Diarization emits `.json` or `.rttm`; transcription `.json` or `.txt`; merge `.json` or plain
 text.
@@ -115,7 +115,7 @@ decodes `--batch-size` of them at once.
 windows of activations simultaneously, and on a 16 GB card that is also driving a desktop
 session, that was enough to exhaust VRAM — at which point Windows spills into system memory and
 the machine can hang rather than reporting an out-of-memory error. Sequential decoding measured
-*faster* here anyway (3.9x realtime against 2.5x), as well as more accurate, so reach for
+_faster_ here anyway (3.9x realtime against 2.5x), as well as more accurate, so reach for
 `--chunk-length` only if you have measured a reason to.
 
 Both stages print free VRAM before loading and warn when it looks tight. Closing browsers and
@@ -149,10 +149,10 @@ Measured on a 6-minute excerpt of a Swedish two-host podcast — the same materi
 sherpa-onnx stack collapsed both hosts into one cluster. Share of speech time given to the
 dominant speaker, varying only an inaudible time offset:
 
-| Offset | 0 ms | 3 ms | 6 ms | 12 ms | 24 ms | 50 ms | 100 ms | 250 ms |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **pyannote 4.0.7** | 76.5 | 76.0 | 76.1 | 76.1 | 76.2 | 76.2 | 76.1 | 76.5 |
-| sherpa-onnx (before) | 58 | 3 | 3 | 55 | 58 | 58 | 58 | 62 |
+| Offset               | 0 ms | 3 ms | 6 ms | 12 ms | 24 ms | 50 ms | 100 ms | 250 ms |
+| -------------------- | ---- | ---- | ---- | ----- | ----- | ----- | ------ | ------ |
+| **pyannote 4.0.7**   | 76.5 | 76.0 | 76.1 | 76.1  | 76.2  | 76.2  | 76.1   | 76.5   |
+| sherpa-onnx (before) | 58   | 3    | 3    | 55    | 58    | 58    | 58     | 62     |
 
 **0.5 points of spread, against a coin flip between 3 and 62.** What matters is the spread
 across a row, not its level — the ~76 is a property of that particular 6-minute window, where one
@@ -173,14 +173,14 @@ Other results on the same material:
 
 The full 38-minute episode through `pipeline.py`:
 
-| | |
-| --- | --- |
-| Speakers found | 2, automatically |
-| Diarization turns | 819 |
-| Transcript segments | 633 |
-| Output blocks | 127 |
-| Unattributed | 1 segment — a one-second "Tack!" outside detected speech |
-| Peak VRAM | 6.5 GB |
+|                     |                                                          |
+| ------------------- | -------------------------------------------------------- |
+| Speakers found      | 2, automatically                                         |
+| Diarization turns   | 819                                                      |
+| Transcript segments | 633                                                      |
+| Output blocks       | 127                                                      |
+| Unattributed        | 1 segment — a one-second "Tack!" outside detected speech |
+| Peak VRAM           | 6.5 GB                                                   |
 
 The unattributed segment is the intended behaviour rather than a miss: a transcript segment
 overlapping no detected speech is left unlabelled instead of being forced onto the nearest
@@ -199,10 +199,10 @@ the clusters you allowed, corrupting the split. Prefer automatic counting, or a
 
 ## Models
 
-| Stage | Default | Why |
-| --- | --- | --- |
-| Diarization | `pyannote/speaker-diarization-community-1` | Overlap-aware clustering; the reason this project exists |
-| Transcription | `KBLab/kb-whisper-large` | The National Library of Sweden's Whisper fine-tune, reported at ~47% lower WER than `whisper-large-v3` on Swedish |
+| Stage         | Default                                    | Why                                                                                                               |
+| ------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Diarization   | `pyannote/speaker-diarization-community-1` | Overlap-aware clustering; the reason this project exists                                                          |
+| Transcription | `KBLab/kb-whisper-large`                   | The National Library of Sweden's Whisper fine-tune, reported at ~47% lower WER than `whisper-large-v3` on Swedish |
 
 Both download on first use. For non-Swedish audio, pass `--model openai/whisper-large-v3` and a
 matching `--language`.
