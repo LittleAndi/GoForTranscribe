@@ -1,0 +1,22 @@
+# Normalise to LF in the repository, and keep LF in the working tree too, so a
+# file does not change shape depending on which machine touched it last.
+* text=auto eol=lf
+
+# Tools that genuinely want CRLF on Windows
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.sln   text eol=crlf
+
+# Never munge line endings in these, even if force-added past .gitignore
+*.bin          binary
+*.onnx         binary
+*.pt           binary
+*.ckpt         binary
+*.safetensors  binary
+*.wav          binary
+*.mp3          binary
+*.m4a          binary
+*.flac         binary
+*.ogg          binary
+*.opus         binary
