@@ -48,8 +48,14 @@ first, or loading fails with a message telling you so.
 
 ## Usage
 
-Four small tools, one per stage, so intermediate results can be inspected and re-run without
-redoing the whole chain.
+The whole chain in one command:
+
+```powershell
+uv run pipeline.py --file episode.mp3 --output episode.txt --timestamps
+```
+
+Or one stage at a time, which is what you want while iterating — each stage's output can be
+inspected, and the expensive stages need not be repeated:
 
 ```powershell
 # 1. who spoke when
@@ -70,12 +76,30 @@ Useful flags:
 | `--min-speakers` / `--max-speakers` | diarize | Bound the count without fixing it |
 | `--offset` / `--duration` | diarize, transcribe | Work on a window rather than the whole file |
 | `--language` | transcribe | Defaults to `sv`; `auto` lets the model decide |
+| `--chunk-length` | transcribe | Switch to chunked decoding — see [Memory](#memory) |
 | `--model` | both | Any compatible checkpoint |
 | `--device` | both | `auto`, `cuda`, or `cpu` |
 | `--timestamps` | merge | Prefix each line with its time range |
+| `--keep-intermediate` | pipeline | Also save the per-stage JSON |
 
 Diarization emits `.json` or `.rttm`; transcription `.json` or `.txt`; merge `.json` or plain
 text.
+
+### Memory
+
+Transcription defaults to Whisper's **sequential** long-form decoding, which holds one 30-second
+window at a time. `--chunk-length 30` switches to chunked decoding, which cuts fixed windows and
+decodes `--batch-size` of them at once.
+
+**Chunking is the faster option in theory and the riskier one in practice.** It holds several
+windows of activations simultaneously, and on a 16 GB card that is also driving a desktop
+session, that was enough to exhaust VRAM — at which point Windows spills into system memory and
+the machine can hang rather than reporting an out-of-memory error. Sequential decoding measured
+*faster* here anyway (3.9x realtime against 2.5x), as well as more accurate, so reach for
+`--chunk-length` only if you have measured a reason to.
+
+Both stages print free VRAM before loading and warn when it looks tight. Closing browsers and
+chat apps genuinely helps; so does letting the integrated GPU drive the displays.
 
 ## Is the result any good?
 

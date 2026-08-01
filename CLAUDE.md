@@ -15,6 +15,7 @@ re-running those.
 | `diarize.py` | Stage 1 — who spoke when |
 | `transcribe.py` | Stage 2 — what was said |
 | `merge.py` | Stage 3 — joins the two by greatest temporal overlap |
+| `pipeline.py` | All three stages in one process, for when it just needs to run |
 | `stability.py` | Sweeps time offsets; the main guard against a meaningless result |
 | `evaluate.py` | DER against reference labels |
 | `make_control.py` | Builds a two-voice control with exact labels (Windows SAPI) |
@@ -300,6 +301,22 @@ Three things here are load-bearing and look like arbitrary choices:
 - **transformers 5 renamed `torch_dtype` to `dtype`.** Most Whisper examples online still use the
   old name, which is silently ignored rather than rejected — leaving the model in fp32 at half
   the speed.
+
+### Do not make chunked decoding the default again
+
+`transcribe.py` deliberately omits `chunk_length_s`, which selects Whisper's sequential long-form
+algorithm. Chunking looks like the obvious optimisation and is available behind `--chunk-length`,
+but it was the default once and **hung this machine**: batching several 30-second windows held
+~15.4 GB of the 16 GB card while a desktop session was using the same GPU, and Windows responded
+by spilling into system memory rather than raising out-of-memory. The box needed a hard restart.
+
+It is not even a speed win here — sequential measured 3.9x realtime against chunked's 2.5x — and
+transformers itself warns that chunking a seq2seq model "will not necessarily be entirely
+accurate". Faster, safer, and more accurate all point the same way.
+
+`common.check_vram()` reports free memory before a model loads and warns below 4 GB. Keep that
+call in any new stage that loads a model: the failure mode it guards against does not surface as
+a catchable exception.
 
 ### Gated models
 
