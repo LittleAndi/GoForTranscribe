@@ -1,0 +1,53 @@
+# Models and weights — large, downloadable, never in git
+models/
+*.bin
+*.onnx
+*.pt
+*.ckpt
+*.safetensors
+
+# Audio in and transcripts out
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.aiff
+*.wma
+*.ogg
+*.opus
+out/
+transcripts/
+# Small test fixtures are fine — add them deliberately: git add -f samples/short.wav
+
+# Secrets and local configuration
+.env
+.env.*
+appsettings*.json
+!appsettings.example.json
+*.local.json
+
+# .NET
+bin/
+obj/
+artifacts/
+TestResults/
+.vs/
+*.user
+*.suo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+# uv.lock is committed on purpose — this is an application, not a library
+
+# Editors and OS
+.idea/
+Thumbs.db
+.DS_Store
