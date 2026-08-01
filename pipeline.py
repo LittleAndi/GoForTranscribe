@@ -12,6 +12,11 @@ in two passes — diarize everything, then transcribe everything — instead of
 running both stages per file. On a folder of ten episodes that is the difference
 between two model loads and twenty.
 
+Files are processed in groups of --batch-files (default 8), and each group is
+written out before the next begins. Two model loads per group is the price;
+what it buys is a bounded amount of held turns and segments, and results on
+disk as the run proceeds rather than only at the very end.
+
 The separate stage tools remain the better choice while iterating, since each
 stage's output can be inspected and the expensive stages need not be repeated.
 """
@@ -64,6 +69,13 @@ def discover(folder: Path, recursive: bool) -> list[Path]:
     )
 
 
+def batches(files: list[Path], size: int | None) -> list[list[Path]]:
+    """Split the work into groups, or one group of everything when size <= 0."""
+    if not size or size <= 0:
+        return [files]
+    return [files[start : start + size] for start in range(0, len(files), size)]
+
+
 def destination(source: Path, output_dir: Path | None, root: Path) -> Path:
     if output_dir is None:
         return source.with_suffix(".txt")
@@ -102,6 +114,80 @@ def read_audio(path: Path, offset: float, duration: float | None):
         return load_waveform(decoded)
 
 
+def run_batch(files, targets, args, device, token, constraints, progress):
+    """Take one group of files all the way to written .txt files.
+
+    Each model is loaded once for the group and released before the next stage,
+    so only one set of weights is resident at a time. Everything the group holds
+    — turns, segments — is dropped when it returns.
+    """
+    results = []
+    failures: list[tuple[Path, str]] = []
+
+    print(f"[1/3] Diarizing {len(files)} file(s)", flush=True)
+    pipeline = diarize.load_pipeline(args.diarization_model, token, device)
+    turns_by_file: dict[Path, list[dict]] = {}
+    for index, path in enumerate(files, 1):
+        try:
+            turns_by_file[path] = diarize.run(
+                pipeline,
+                path,
+                offset=args.offset,
+                duration=args.duration,
+                constraints=constraints,
+                progress=progress,
+            )
+            print(f"      {index}/{len(files)} {path.name}: {len(turns_by_file[path])} turns")
+        except Exception as error:
+            # One unreadable file should not cost the whole batch.
+            failures.append((path, f"diarization: {error}"))
+            print(f"      {index}/{len(files)} {path.name}: FAILED ({error})", file=sys.stderr)
+
+    del pipeline
+    free_gpu()
+
+    print(f"[2/3] Transcribing {len(turns_by_file)} file(s)", flush=True)
+    asr = asr_stage.load_asr(args.asr_model, device, args.token)
+    segments_by_file: dict[Path, list[dict]] = {}
+    for index, path in enumerate(turns_by_file, 1):
+        try:
+            samples, rate = read_audio(path, args.offset, args.duration)
+            segments_by_file[path] = asr_stage.run(
+                asr,
+                samples,
+                rate,
+                language=args.language,
+                chunk_length=args.chunk_length,
+                batch_size=args.batch_size,
+                offset=args.offset,
+            )
+            print(
+                f"      {index}/{len(turns_by_file)} {path.name}: "
+                f"{len(segments_by_file[path])} segments"
+            )
+        except Exception as error:
+            failures.append((path, f"transcription: {error}"))
+            print(
+                f"      {index}/{len(turns_by_file)} {path.name}: FAILED ({error})",
+                file=sys.stderr,
+            )
+
+    del asr
+    free_gpu()
+
+    print("[3/3] Merging", flush=True)
+    for path, segments in segments_by_file.items():
+        summary = write_result(turns_by_file[path], segments, targets[path], args)
+        results.append((path, targets[path], summary))
+        print(
+            f"      {path.name} -> {targets[path].name}  "
+            f"{summary['speakers']} speaker(s), {summary['blocks']} blocks"
+            + (f", {summary['unattributed']} unattributed" if summary["unattributed"] else "")
+        )
+
+    return results, failures
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     source = parser.add_mutually_exclusive_group(required=True)
@@ -114,6 +200,14 @@ def main() -> None:
         "--overwrite",
         action="store_true",
         help="redo files that already have a .txt beside them",
+    )
+    parser.add_argument(
+        "--batch-files",
+        type=int,
+        default=8,
+        metavar="N",
+        help="files per group, each group written before the next starts; "
+        "0 processes the whole folder in one group (--folder only, default: 8)",
     )
     parser.add_argument("--speakers", type=int, help="exact count; see CLAUDE.md before using")
     parser.add_argument("--min-speakers", type=int)
@@ -193,66 +287,18 @@ def main() -> None:
     }
 
     started = time.perf_counter()
+    results = []
     failures: list[tuple[Path, str]] = []
 
-    print(f"[1/3] Diarizing {len(files)} file(s)", flush=True)
-    pipeline = diarize.load_pipeline(args.diarization_model, token, device)
-    turns_by_file: dict[Path, list[dict]] = {}
-    for index, path in enumerate(files, 1):
-        try:
-            turns_by_file[path] = diarize.run(
-                pipeline,
-                path,
-                offset=args.offset,
-                duration=args.duration,
-                constraints=constraints,
-                progress=len(files) == 1,
-            )
-            print(f"      {index}/{len(files)} {path.name}: {len(turns_by_file[path])} turns")
-        except Exception as error:
-            # One unreadable file should not cost the whole batch.
-            failures.append((path, f"diarization: {error}"))
-            print(f"      {index}/{len(files)} {path.name}: FAILED ({error})", file=sys.stderr)
-
-    del pipeline
-    free_gpu()
-
-    print(f"[2/3] Transcribing {len(turns_by_file)} file(s)", flush=True)
-    asr = asr_stage.load_asr(args.asr_model, device, args.token)
-    segments_by_file: dict[Path, list[dict]] = {}
-    for index, path in enumerate(turns_by_file, 1):
-        try:
-            samples, rate = read_audio(path, args.offset, args.duration)
-            segments_by_file[path] = asr_stage.run(
-                asr,
-                samples,
-                rate,
-                language=args.language,
-                chunk_length=args.chunk_length,
-                batch_size=args.batch_size,
-                offset=args.offset,
-            )
-            print(
-                f"      {index}/{len(turns_by_file)} {path.name}: "
-                f"{len(segments_by_file[path])} segments"
-            )
-        except Exception as error:
-            failures.append((path, f"transcription: {error}"))
-            print(f"      {index}/{len(turns_by_file)} {path.name}: FAILED ({error})", file=sys.stderr)
-
-    del asr
-    free_gpu()
-
-    print("[3/3] Merging", flush=True)
-    results = []
-    for path, segments in segments_by_file.items():
-        summary = write_result(turns_by_file[path], segments, targets[path], args)
-        results.append((path, targets[path], summary))
-        print(
-            f"      {path.name} -> {targets[path].name}  "
-            f"{summary['speakers']} speaker(s), {summary['blocks']} blocks"
-            + (f", {summary['unattributed']} unattributed" if summary["unattributed"] else "")
+    groups = batches(files, args.batch_files)
+    for number, group in enumerate(groups, 1):
+        if len(groups) > 1:
+            print(f"\n=== Batch {number}/{len(groups)} ({len(group)} file(s)) ===", flush=True)
+        done, broken = run_batch(
+            group, targets, args, device, token, constraints, progress=len(files) == 1
         )
+        results.extend(done)
+        failures.extend(broken)
 
     elapsed = time.perf_counter() - started
     speech = sum(summary["speech"] for _, _, summary in results)

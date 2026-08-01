@@ -62,10 +62,15 @@ uv run pipeline.py --folder podcasts\ --output-dir transcripts\ --recursive
 ```
 
 A batch loads each model **once** rather than once per file, which is why it runs in two passes —
-diarize everything, then transcribe everything. On ten episodes that is two model loads instead
-of twenty. Files that already have a `.txt` are skipped unless `--overwrite` is passed, so an
-interrupted batch resumes where it stopped, and one unreadable file is reported at the end rather
-than killing the run.
+diarize everything, then transcribe everything. Files that already have a `.txt` are skipped
+unless `--overwrite` is passed, so an interrupted batch resumes where it stopped, and one
+unreadable file is reported at the end rather than killing the run.
+
+Work is done in groups of `--batch-files` (default 8), and **each group's transcripts are written
+before the next group starts**. Both models are loaded per group, so a smaller number costs more
+model loads — the default trades one extra pair of them per group for two things worth having on
+a long run: turns and segments for at most `N` files held at once, and results on disk as it goes
+rather than only at the very end. `--batch-files 0` processes the whole folder as one group.
 
 `--recursive` descends into subdirectories, and the structure is mirrored in `--output-dir` so
 two files with the same name in different folders cannot overwrite each other.
@@ -101,6 +106,8 @@ Useful flags:
 | `--device`                          | both                | `auto`, `cuda`, or `cpu`                                                                           |
 | `--timestamps`                      | merge               | Prefix each line with its time range                                                               |
 | `--keep-intermediate`               | pipeline            | Also save the per-stage JSON                                                                       |
+| `--batch-files n`                   | pipeline            | Files per group when processing a folder; `0` for all at once                                     |
+| `--overwrite`                       | pipeline            | Redo folder entries that already have a `.txt`                                                    |
 
 Diarization emits `.json` or `.rttm`; transcription `.json` or `.txt`; merge `.json` or plain
 text.
