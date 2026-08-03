@@ -13,6 +13,7 @@ re-running those.
 | --- | --- |
 | `common.py` | Shared audio decoding, device selection, torchcodec workaround |
 | `diarize.py` | Stage 1 — who spoke when |
+| `detect_language.py` | Picks a language for a file before transcription, so `pipeline.py` doesn't have to be told |
 | `transcribe.py` | Stage 2 — what was said |
 | `merge.py` | Stage 3 — joins the two by greatest temporal overlap |
 | `pipeline.py` | All three stages in one process; `--file` or `--folder` for batches |
@@ -332,6 +333,70 @@ The token is read from `$HF_TOKEN`/`$HUGGINGFACE_TOKEN` or `--token`, and must n
 to a tracked file. Note that `Pipeline.from_pretrained` returns `None` — rather than raising —
 when the token is valid but the model's terms have not been accepted; `diarize.py` detects that
 case and says so, because the bare `None` is otherwise a baffling failure.
+
+## Language routing
+
+`pipeline.py` no longer assumes Swedish. `detect_language.py` identifies each file's language
+with `openai/whisper-tiny` before transcription, and the ASR model follows from that:
+`KBLab/kb-whisper-large` (the default) only knows Swedish, so anything else is routed to
+`openai/whisper-large-v3` instead of being forced through a model that cannot speak it. An
+explicit `--language` (or `--asr-model`) on `pipeline.py` still bypasses detection entirely, for
+exact backward compatibility.
+
+**A single sampled window is not enough — it found nothing on a folder where non-Swedish audio
+is known to exist.** A one-window-per-file scan of ~300 episodes in `F:\logistikpodden` (see
+`CLAUDE.local.md`) came back 100% Swedish. The reason: `Drönare - Från leksak till industri.mp3`
+opens with roughly six minutes of Swedish before switching to an English interview for most of
+its 42-minute runtime, and every single-window offset tried (default 60s, and later a fixed
+90s) landed inside that intro. Whisper-tiny was confidently right about the window it saw and
+confidently wrong about the file.
+
+**Fixed by sampling several windows spread across the file and taking a majority vote**
+(`detect_language.detect_file`, default 3 windows at roughly 15%/45%/75% through the file,
+skipping the very start and end where a jingle or outro is least representative). On the same
+file this correctly returns `en` at ~90% confidence, from two English windows outvoting the one
+Swedish one. Confidence is the mean over only the windows that agreed with the winner, so a
+narrow 2-of-3 majority reads as less certain than a unanimous one — that number is what
+`--langid-min-confidence` (default 0.5) checks before trusting the result over
+`--fallback-language`.
+
+**Do not "simplify" this back to a single window.** It looks redundant on a file spoken in one
+language throughout — three windows all agree and the extra decode cost is small — but a single
+window is exactly what missed the one file in this project's own test library that actually
+needed the feature.
+
+### Mixed-language files get flagged, not silently routed
+
+A whole-file `(asr_model, language)` choice is still wrong for a file that genuinely switches
+languages partway through — routing `Drönare - Från leksak till industri.mp3` as one language
+transcribes six minutes correctly and mistranscribes the other 36, or vice versa. `detect_languages`
+flags any file whose sampled windows disagree (`MIXED-LANGUAGE` in the output, plus a summary
+list at the end of the detection pass) rather than picking a side quietly. A normal `--folder`
+run pays nothing extra for this — the disagreement was already computed to decide the vote.
+
+`--split-language` (`--file` only, refuses `--folder`) handles a flagged file properly:
+`bisect_boundary` narrows the gap between a window that read one language and the next window
+that didn't, down to `--split-min-resolution` (15s default — finer than that buys nothing,
+since Whisper's own long-form decoding works in ~30s windows anyway), then `locate_regions`
+turns that into two `(start, duration, language, model)` regions. Each region is transcribed
+separately via the same `--offset`/`--duration` machinery every other run already uses, and the
+resulting segment lists are concatenated and handed to the same `merge()` as always — it matches
+segments to diarization turns by time overlap and has no notion of which ASR pass produced a
+given segment, so nothing about the merge step needed to change.
+
+Measured on the same file: the boundary search landed on **00:08:06**, and the transcript on
+either side of it reads correctly — Swedish up to "...tackar vi Bring för samarbetet..." and,
+one line later, English starting "Today we're going to focus on future and the use of drones...".
+Diarization ran once over the whole file, so speaker labels carry across the switch unbroken.
+
+`locate_regions` only handles one clean switch: every minority-language reading must sit at one
+end of the sampled sequence in time order (a prefix or suffix of the vote), matching the
+"opens in X, switches to Y" pattern this was built for. A file that bounces between languages
+across the samples (`sv, en, sv`, say) is refused with an error rather than guessed at — silently
+mistranscribing part of a file is worse than stopping and asking for a manual look. That pattern
+hasn't been seen yet; if it turns up, treating each diarized turn as its own language-id unit
+would be the next step, at roughly 2x ASR cost on the flagged file since every turn boundary is
+also a potential model switch.
 
 ## Repository hygiene
 
