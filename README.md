@@ -75,9 +75,28 @@ rather than only at the very end. `--batch-files 0` processes the whole folder a
 `--recursive` descends into subdirectories, and the structure is mirrored in `--output-dir` so
 two files with the same name in different folders cannot overwrite each other.
 
-> **`--language` applies to every file in the batch.** It defaults to `sv`, and Whisper will
-> quietly _translate_ rather than refuse: an English recording transcribed with `--language sv`
-> comes back as fluent Swedish. For a mixed-language folder use `--language auto`.
+> **`pipeline.py` detects each file's language automatically** with a small Whisper model
+> (`detect_language.py`) rather than assuming one, because Whisper will quietly _translate_
+> rather than refuse — an English recording transcribed with `--language sv` comes back as
+> fluent Swedish. The default ASR model, `KBLab/kb-whisper-large`, only knows Swedish, so a file
+> detected as anything else is routed to `openai/whisper-large-v3` instead; a low-confidence
+> read (near-silence, a music-only intro) falls back to `--fallback-language` (default `sv`)
+> rather than being trusted. Pass `--language` to force one language — and, with it, one
+> model — for the whole batch instead, exactly as before this existed.
+>
+> `transcribe.py` on its own still defaults to `sv` with no detection pass; it is the low-level
+> single-file tool, and `--language auto` there lets Whisper decide per 30-second chunk within
+> whatever `--model` you pass it.
+>
+> A file whose sampled windows disagree — one language for a stretch, then another — is flagged
+> `MIXED-LANGUAGE` in the output rather than silently forced one way. That's not a hypothetical:
+> one episode in this project's own test library opens with a six-minute Swedish segment before
+> switching to an English interview for the rest of its 42 minutes (see "Language routing" in
+> `CLAUDE.md`). Rerun a flagged file on its own with `--file` and `--split-language` to
+> transcribe it in language-homogeneous regions instead of one whole-file guess — it locates the
+> switch point and runs each region through its own model, then merges the results exactly like
+> a normal run. Not available for `--folder`: it costs a second ASR model load per flagged file,
+> worth paying only for the rare file a normal run already flagged.
 
 Or one stage at a time, which is what you want while iterating — each stage's output can be
 inspected, and the expensive stages need not be repeated:
@@ -100,7 +119,10 @@ Useful flags:
 | `--speakers n`                      | diarize             | Fix the speaker count. **Avoid unless the audio is clean** — see [Ads and intros](#ads-and-intros) |
 | `--min-speakers` / `--max-speakers` | diarize             | Bound the count without fixing it                                                                  |
 | `--offset` / `--duration`           | diarize, transcribe | Work on a window rather than the whole file                                                        |
-| `--language`                        | transcribe          | Defaults to `sv`; `auto` lets the model decide                                                     |
+| `--language`                        | transcribe, pipeline | `transcribe.py` defaults to `sv`; `pipeline.py` detects per file by default; `auto` lets the model decide instead of forcing a token |
+| `--asr-model`                       | pipeline             | Forces one ASR model for the whole batch instead of routing by detected language                  |
+| `--fallback-language`               | pipeline             | Used when detection confidence is below `--langid-min-confidence` (default `sv`)                   |
+| `--split-language`                  | pipeline             | `--file` only: transcribe a `MIXED-LANGUAGE`-flagged file region by region instead of one pass    |
 | `--chunk-length`                    | transcribe          | Switch to chunked decoding — see [Memory](#memory)                                                 |
 | `--model`                           | both                | Any compatible checkpoint                                                                          |
 | `--device`                          | both                | `auto`, `cuda`, or `cpu`                                                                           |
@@ -211,8 +233,9 @@ the clusters you allowed, corrupting the split. Prefer automatic counting, or a
 | Diarization   | `pyannote/speaker-diarization-community-1` | Overlap-aware clustering; the reason this project exists                                                          |
 | Transcription | `KBLab/kb-whisper-large`                   | The National Library of Sweden's Whisper fine-tune, reported at ~47% lower WER than `whisper-large-v3` on Swedish |
 
-Both download on first use. For non-Swedish audio, pass `--model openai/whisper-large-v3` and a
-matching `--language`.
+Both download on first use. `pipeline.py` picks between them automatically per file — see the
+`--language` note under [Usage](#usage); `transcribe.py` on its own still needs `--model
+openai/whisper-large-v3` and a matching `--language` passed explicitly for non-Swedish audio.
 
 ## Licence
 
